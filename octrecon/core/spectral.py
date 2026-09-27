@@ -173,5 +173,5 @@ def average_repeats(mag, n_frames: int, hdr):
     if nb == 1 and na == 1:
         return mag
     m5 = mag.reshape(n_frames, nb, hdr.size_x, na, mag.shape[-1])
-    m4 = m5.mean(axis=1) if nb > 1 else m5[:, 0]
-    return m4.mean(axis=2) if na > 1 else m4[:, :, 0]
+    m4 = m5.mean(1) if nb > 1 else m5[:, 0]          # positional axis: numpy, cupy and torch
+    return m4.mean(2) if na > 1 else m4[:, :, 0]

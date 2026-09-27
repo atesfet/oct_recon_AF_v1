@@ -1,6 +1,7 @@
 # OCT Reconstruction (oct_recon_AF_v1)
 
 GPU/CPU reconstruction of **tiled Thorlabs OCT volumes** with a local **web app**.
+It runs on NVIDIA GPUs (CUDA, Linux/Windows), on **Apple-silicon GPUs (Metal/MPS, macOS)** and on any CPU.
 This is a Python port of the MATLAB **myOCT** tiled-scan reconstruction
 (`yOCTProcessTiledScan`). Its output matches the legacy MATLAB output to within 1 LSB
 (bit-exact with the legacy quantisation), and it runs **~80× faster on an NVIDIA GPU**.
@@ -25,13 +26,15 @@ The CPU version is ~15× faster than legacy.
 | Platform | How to start |
 |---|---|
 | **Ubuntu / Linux** | `./start_linux.sh` from a terminal, or double-click it and choose *Run* |
-| **macOS** | Double-click `start_mac.command`. The first time, macOS may block it: right-click → *Open* → *Open*. If needed, run `chmod +x start_mac.command start_linux.sh` once. |
+| **macOS** | Double-click `start_mac.command`. The first time, macOS may block it: right-click → *Open* → *Open*. If needed, run `chmod +x start_mac.command start_linux.sh` once. On Apple silicon it also installs PyTorch, so the **Apple GPU (Metal/MPS)** is used. |
 | **Windows** | Double-click `start_windows.bat` |
 
 The **first start** creates the conda environment `oct_reconstruction`, which takes a few
-minutes. If an NVIDIA driver is detected, it also installs GPU support (CuPy) that matches
-your driver's CUDA version. After that, the app opens in your browser at
-`http://127.0.0.1:8765/`. Keep the terminal window open while you use the app, and close it
+minutes. It also adds GPU support automatically:
+* **NVIDIA driver found:** CuPy, matched to your driver's CUDA version;
+* **macOS:** PyTorch, for the Apple GPU (Metal/MPS).
+
+After that, the app opens in your browser at `http://127.0.0.1:8765/`. Keep the terminal window open while you use the app, and close it
 (or press Ctrl+C) to stop the server.
 
 > The server listens on `127.0.0.1` only. Nothing is exposed to the network, and no internet
@@ -46,10 +49,23 @@ python launch.py                              # --port 8765 --no-browser
 ```
 
 ### GPU requirements
-* An NVIDIA GPU with a recent driver, on Linux or Windows. The CUDA toolkit is installed
-  inside the environment, so no system CUDA install is needed.
-* macOS has no CUDA, so the app runs in **CPU mode**. CPU mode is supported on Intel and
-  Apple-silicon Macs.
+| GPU | Backend | Requirements |
+|---|---|---|
+| NVIDIA (Linux/Windows) | CuPy: fused CUDA kernel + cuFFT. The fastest option, fully validated. | A recent NVIDIA driver. The CUDA toolkit is installed inside the environment. |
+| Apple silicon M1–M4 (macOS) | PyTorch Metal/**MPS**: the same maths on PyTorch tensors, float32. | macOS 13 or newer, PyTorch ≥ 2.3 (installed by the launcher). |
+| none | CPU: Numba + multithreaded FFT. | Any 64-bit CPU. |
+
+* In the web page, **GPU** means "whichever GPU this machine has": CUDA first, then Apple MPS.
+* The Apple-GPU backend runs a numerical **self-test** against the CPU at start-up. If the
+  self-test fails (e.g. an old macOS without MPS FFT support), the app says so and uses the
+  CPU.
+* Ops that MPS does not implement fall back to the CPU automatically
+  (`PYTORCH_ENABLE_MPS_FALLBACK=1`).
+* Estimators and previews run on the CPU on Macs; they take a few seconds.
+* The MPS code path is validated on every machine through PyTorch's CPU device
+  (`tests/test_torch_backend.py`): it matches legacy MATLAB to 9e-5 dB on the reference
+  dataset. However, it has **not yet been timed on real Apple hardware**; please report
+  throughput with `python scripts/benchmark.py <OCTVolume> --device mps --planes 20`.
 * If the GPU is shown as *not available*: on laptops, CUDA sometimes breaks after
   **suspend/resume** (`cuInit` error 999). Reboot, or run
   `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm`. To prevent it permanently on Ubuntu,
@@ -167,8 +183,8 @@ its β).
 ### 4.3 Compute parameters
 | Key | Default | Notes |
 |---|---|---|
-| `device` | `auto` | `gpu` / `cpu` / `auto` (GPU if available). |
-| `precision` | `float32` | Within 1e-4 dB of `float64`; the uint16 step is 1e-3 dB. |
+| `device` | `auto` | `auto` (CUDA, else Apple MPS, else CPU), `gpu` (CUDA or MPS), `mps`, `cpu`. |
+| `precision` | `float32` | Within 1e-4 dB of `float64`; the uint16 step is 1e-3 dB. MPS supports float32 only. |
 | `gpu_fused_kernel` | `true` | Fused CUDA pre-FFT kernel (6× faster spectral stage). |
 | `batch_frames` | 50 | B-scans per batch. Lower it for GPUs with little memory; 50 uses about 4 GB of VRAM. |
 | `io_threads` | 8 | Parallel raw-file readers. |
@@ -224,10 +240,13 @@ For each raw B-scan the pipeline does, in order:
 8. the weighted mean across the z-stack, then conversion to dB.
 
 What changed relative to legacy:
-* **GPU:** the per-voxel maths runs on the GPU. A fused CUDA kernel does the apodization
+* **GPU (NVIDIA):** the per-voxel maths runs on the GPU. A fused CUDA kernel does the apodization
   subtraction, the banded sinc5 operator and the window. Then come batched cuFFT, the
   magnitude, the gather-based optical-path correction, and separable interpolation as
   batched matrix products, with the accumulators kept in VRAM.
+* **GPU (Apple silicon):** the same stages run as PyTorch MPS tensor ops. The sinc5 gather
+  is done with the spectral axis first (contiguous row gathers), then the FFT, the
+  optical-path gather and the interpolation matmuls.
 * **CPU:** the same maths runs as a Numba-parallel kernel with multithreaded FFT.
 * **I/O:** tiles are read tile-major and sequentially, by threaded readers that prefetch
   and overlap with compute. With a GPU the run is limited by disk read speed, so faster
@@ -254,13 +273,14 @@ octrecon/                 Python package
   params.py               volume inspection + automatic parameter resolution
   presets.py              system/probe constants (dispersion, focus sigma)
   io/                     ScanInfo, Thorlabs headers/chirp, tile readers (.oct / unzipped / ...), TIFF writer
-  core/                   geometry, spectral processing (CPU/GPU kernels), stitching
+  core/                   geometry, spectral processing (CPU/CUDA kernels), stitching,
+                          torch_backend.py (Apple GPU / MPS)
   estimation/             automatic dispersion / focus detection, drift fit, B-scan previews
   webapp/                 local web server + static UI (no internet needed)
   cli.py                  command line (python -m octrecon ...)
 launch.py                 starts the web app and opens the browser
 start_linux.sh / start_mac.command / start_windows.bat   one-click launchers
-tools/setup_gpu.py        installs CuPy matching the NVIDIA driver
+tools/setup_gpu.py        adds GPU support: CuPy matched to the NVIDIA driver, or PyTorch (MPS) on macOS
 environment.yml, requirements*.txt, pyproject.toml
 configs/                  example configs
 scripts/                  benchmark, resource monitor, synthetic test-volume generator
@@ -278,6 +298,7 @@ pytest -q tests          # ~10 s, CPU: synthetic volumes in every supported form
 # real-data regression (optional):
 OCT_TEST_VOLUME=/data/10um_FOV_1/OCTVolume OCT_LEGACY_TIFF=/data/10um_FOV_1/legacy.tiff pytest -q tests
 OCT_DEVICE=gpu OCT_TEST_VOLUME=... pytest -q tests          # the same on the GPU
+OCT_TORCH_DEVICE=mps pytest -q tests/test_torch_backend.py  # Apple GPU (default: PyTorch CPU device)
 python scripts/make_synthetic_volume.py --help              # generate small test volumes
 python tests/test_formats.py --build-reference              # rebuild MATLAB references (needs MATLAB + myOCT)
 ```
@@ -291,6 +312,7 @@ python tests/test_formats.py --build-reference              # rebuild MATLAB ref
 | "Out of memory" on GPU | Lower `batch_frames` (e.g. 20). |
 | The system runs out of RAM | Lower `prefetch_batches` / `io_threads`, and close large viewers such as Fiji stacks. |
 | Slow on GPU | Check the disk read speed. The GPU pipeline reads the raw data at the drive's limit, so copying the raw data to an internal SSD helps. |
+| macOS: GPU card greyed out | The UI shows the reason. Re-run `start_mac.command` (it installs PyTorch), and check macOS ≥ 13 on Apple silicon. |
 | macOS: "cannot be opened" | Right-click `start_mac.command` → *Open*, or `xattr -d com.apple.quarantine start_mac.command`. |
 
 ## License

@@ -71,22 +71,32 @@ def system_info():
         info["ram_available_GB"] = round(vm.available / 1e9, 1)
     except Exception:
         pass
+    from ..backend import mps_status
     try:
         import cupy  # noqa: F401
         has_cupy = True
     except Exception:
         has_cupy = False
-    if not has_cupy:
-        info["gpu_note"] = ("CuPy is not installed (CPU-only environment). On a machine with an NVIDIA GPU, "
-                            "re-run the launcher with the GPU option, see README.")
-    elif gpu_available():
+    if has_cupy and gpu_available():
         import cupy as cp
         p = cp.cuda.runtime.getDeviceProperties(0)
-        info.update(gpu_available=True, gpu_name=p["name"].decode() if isinstance(p["name"], bytes) else p["name"],
+        info.update(gpu_available=True, gpu_kind="cuda",
+                    gpu_name=p["name"].decode() if isinstance(p["name"], bytes) else p["name"],
                     vram_GB=round(p["totalGlobalMem"] / 1e9, 1))
-    else:
+    elif sys.platform == "darwin":
+        ok, msg = mps_status()
+        if ok:
+            info.update(gpu_available=True, gpu_kind="mps", gpu_name="Apple GPU (Metal/MPS)",
+                        vram_GB=info.get("ram_total_GB"))
+        else:
+            info["gpu_note"] = (f"Apple GPU not usable: {msg}. Re-run start_mac.command to install PyTorch "
+                                "(needs Apple silicon or a Metal GPU and macOS 13+).")
+    elif has_cupy:
         info["gpu_note"] = ("CUDA is installed but the GPU cannot be initialised (on laptops this typically happens "
                             "after suspend/resume: reboot, or run `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm`).")
+    else:
+        info["gpu_note"] = ("CuPy is not installed (CPU-only environment). On a machine with an NVIDIA GPU, "
+                            "re-run the launcher so it can add GPU support, see README.")
     from ..pipeline import ReconConfig
     info["defaults"] = asdict(ReconConfig(volume_folder=""))
     return info

@@ -1,4 +1,7 @@
-"""Install GPU support (CuPy) into the current environment if an NVIDIA GPU driver is present.
+"""Install GPU support into the current environment.
+
+  * NVIDIA GPU (Linux/Windows): CuPy, with the CUDA toolkit matched to the driver.
+  * macOS (Apple silicon / Metal GPU): PyTorch, whose MPS backend drives the Apple GPU.
 
 Called by the launchers:
     python tools/setup_gpu.py --conda <path-to-conda> --env <name>     (conda mode)
@@ -33,6 +36,32 @@ def have_cupy():
         return False
 
 
+def have_torch_mps():
+    try:
+        import torch
+        return torch.backends.mps.is_available()
+    except Exception:
+        return None          # torch missing
+
+
+def setup_mac(a):
+    st = have_torch_mps()
+    if st:
+        print("[setup_gpu] PyTorch with Apple GPU (MPS) support is installed."); return
+    if st is False:
+        print("[setup_gpu] PyTorch is installed but MPS is not available on this Mac "
+              "(needs Apple silicon or a Metal GPU and macOS 13+) -> CPU mode."); return
+    print("[setup_gpu] macOS: installing PyTorch for Apple-GPU (Metal/MPS) acceleration ...", flush=True)
+    try:
+        if a.conda:
+            subprocess.check_call([a.conda, "install", "-y", "-n", a.env, "-c", "conda-forge", "pytorch"])
+        else:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements-mac.txt"])
+        print("[setup_gpu] done.")
+    except subprocess.CalledProcessError as e:
+        print(f"[setup_gpu] PyTorch could not be installed ({e}); continuing in CPU mode.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--conda")
@@ -40,7 +69,7 @@ def main():
     ap.add_argument("--pip", action="store_true")
     a = ap.parse_args()
     if sys.platform == "darwin":
-        print("[setup_gpu] macOS: no CUDA support, CPU mode only."); return
+        return setup_mac(a)
     ver = driver_cuda_version()
     if ver is None:
         print("[setup_gpu] no NVIDIA driver found (nvidia-smi) -> CPU mode only."); return

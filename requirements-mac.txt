@@ -1,0 +1,3 @@
+# Apple-GPU (Metal/MPS) acceleration via PyTorch (macOS). tools/setup_gpu.py installs this
+# automatically on macOS; the app falls back to CPU if MPS is unavailable.
+torch>=2.3

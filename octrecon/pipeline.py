@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from . import params as P
-from .backend import get_xp, synchronize, to_numpy
+from .backend import get_xp, is_torch, synchronize, to_numpy
 from .core.geometry import build_spectral_geometry, build_tiled_geometry
 from .core.spectral import SpectralProcessor, average_repeats, binned_columns
 from .core.stitching import OpticalPathCorrection, TileStitcher, min_weight_threshold
@@ -100,6 +100,9 @@ class Reconstructor:
         self.cancel = cancel or threading.Event()
         self.xp, self.device = get_xp(cfg.device)
         self.dtype = np.float32 if cfg.precision == "float32" else np.float64
+        if is_torch(self.xp) and self.dtype != np.float32:
+            self.log("note: the Apple GPU (MPS) supports float32 only -> precision set to float32")
+            self.dtype = np.float32
 
         vol = Path(cfg.volume_folder)
         if not (vol / "ScanInfo.json").exists() and (vol / "OCTVolume" / "ScanInfo.json").exists():
@@ -168,15 +171,22 @@ class Reconstructor:
         poly = si.optical_path_polynomial() if cfg.apply_path_length_correction else None
         self.oc = (OpticalPathCorrection.build(poly, self.tg.tile_x_mm, self.tg.tile_y_mm, self.tg.tile_z_mm)
                    if poly is not None else None)
-        self.sp = SpectralProcessor(self.sg, hdr.apod_size, xp=self.xp, dtype=self.dtype,
-                                    use_gpu_kernel=cfg.gpu_fused_kernel,
-                                    ascan_binning=hdr.spectra_avg, apod_mode=hdr.apod_mode,
-                                    apod_group=max(1, hdr.bscan_avg))
+        torch_backend = is_torch(self.xp)
+        if torch_backend:   # Apple GPU (MPS) / torch-cpu: same maths on PyTorch tensors
+            from .core.torch_backend import TorchSpectralProcessor, TorchTileStitcher
+            self.sp = TorchSpectralProcessor(self.sg, hdr.apod_size, self.xp, ascan_binning=hdr.spectra_avg,
+                                             apod_mode=hdr.apod_mode, apod_group=max(1, hdr.bscan_avg))
+        else:
+            self.sp = SpectralProcessor(self.sg, hdr.apod_size, xp=self.xp, dtype=self.dtype,
+                                        use_gpu_kernel=cfg.gpu_fused_kernel,
+                                        ascan_binning=hdr.spectra_avg, apod_mode=hdr.apod_mode,
+                                        apod_group=max(1, hdr.bscan_avg))
         self.stitchers = {}
         for xi, xc in enumerate(si.x_centers_mm):
             for zi, zd in enumerate(si.z_depths_mm):
-                self.stitchers[(xi, zi)] = TileStitcher(self.tg, self.oc, xc, zd, self.focus[zi],
-                                                        sigma, xp=self.xp, dtype=self.dtype)
+                st = TileStitcher(self.tg, self.oc, xc, zd, self.focus[zi], sigma,
+                                  xp=np if torch_backend else self.xp, dtype=self.dtype)
+                self.stitchers[(xi, zi)] = TorchTileStitcher(st, self.oc, self.xp) if torch_backend else st
         self.n_out = (len(self.tg.out_y_mm), len(self.tg.out_z_mm), len(self.tg.out_x_mm))
         self.prefetch = self._memory_safe_prefetch()
         self.timers = {"io_wait": 0.0, "h2d": 0.0, "spectral": 0.0, "stitch": 0.0, "finalise": 0.0}
@@ -287,7 +297,7 @@ class Reconstructor:
         den[den < min_weight_threshold(self.dtype)] = xp.nan
         with np.errstate(divide="ignore", invalid="ignore"):
             db = 20 * xp.log10(num / den)
-        out = to_numpy(db.astype(np.float32))
+        out = to_numpy(db).astype(np.float32, copy=False)
         self.timers["finalise"] += time.perf_counter() - t0
         return out
 

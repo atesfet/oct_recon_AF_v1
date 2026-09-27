@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "octrecon"
 version = "1.0.0"
-description = "GPU/CPU reconstruction of tiled Thorlabs OCT volumes (Python port of myOCT yOCTProcessTiledScan) with a local web UI"
+description = "GPU (NVIDIA CUDA / Apple MPS) and CPU reconstruction of tiled Thorlabs OCT volumes (Python port of myOCT yOCTProcessTiledScan) with a local web UI"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = ["numpy>=1.26", "scipy", "numba", "tifffile", "imagecodecs", "pyy
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x"]
+mps = ["torch>=2.3"]
 test = ["pytest", "h5py"]
 
 [project.scripts]

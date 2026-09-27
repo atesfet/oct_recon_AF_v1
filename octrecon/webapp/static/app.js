@@ -36,12 +36,13 @@ async function loadSystem() {
   S.sep = s.platform.toLowerCase().includes("windows") ? "\\" : "/";
   const b = $("sysbadges"); b.innerHTML = "";
   const add = (txt, cls) => { const e = document.createElement("span"); e.className = "badge " + (cls || ""); e.textContent = txt; b.appendChild(e); };
-  add(s.gpu_available ? `GPU: ${s.gpu_name} (${s.vram_GB} GB)` : "GPU: not available", s.gpu_available ? "ok" : "warn");
+  add(s.gpu_available ? `GPU: ${s.gpu_name}${s.gpu_kind === "mps" ? "" : ` (${s.vram_GB} GB)`}` : "GPU: not available", s.gpu_available ? "ok" : "warn");
   add(`CPU: ${s.cpu_count} threads`);
   if (s.ram_total_GB) add(`RAM: ${s.ram_available_GB}/${s.ram_total_GB} GB free`, s.ram_available_GB < 5 ? "warn" : "");
   if (s.ram_available_GB && s.ram_available_GB < 5)
     toast(`Only ${s.ram_available_GB} GB RAM free: a reconstruction needs ~3-6 GB. Close large programs (e.g. image viewers) before starting.`, true);
-  $("gpu-desc").textContent = s.gpu_available ? `${s.gpu_name} · CuPy/CUDA · fastest (I/O-bound)` : (s.gpu_note || "not available");
+  $("gpu-desc").textContent = !s.gpu_available ? (s.gpu_note || "not available")
+    : s.gpu_kind === "mps" ? `${s.gpu_name} · PyTorch Metal backend (float32)` : `${s.gpu_name} · CuPy/CUDA · fastest (I/O-bound)`;
   $("cpu-desc").textContent = `${s.cpu_count} threads · Numba + multithreaded FFT (~5× slower than GPU)`;
   if (!s.gpu_available) { $("dev-gpu").classList.add("disabled"); document.querySelector("input[value=gpu]").disabled = true; }
   document.querySelector(`input[value=${s.gpu_available ? "gpu" : "cpu"}]`).checked = true;

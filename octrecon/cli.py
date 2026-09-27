@@ -2,7 +2,7 @@
 
   python -m octrecon web [--port 8765] [--no-browser]
   python -m octrecon inspect  <OCTVolume>
-  python -m octrecon reconstruct <OCTVolume> --output-root DIR --output-name NAME [--device gpu|cpu] [--config cfg.json|yaml] [--set key=value ...]
+  python -m octrecon reconstruct <OCTVolume> --output-root DIR --output-name NAME [--device auto|gpu|mps|cpu] [--config cfg.json|yaml] [--set key=value ...]
   python -m octrecon estimate-dispersion <OCTVolume> [--device ...]
   python -m octrecon detect-focus <OCTVolume> [--dispersion B] [--device ...]
   python -m octrecon extract <OCTVolume> [--delete-archives]      # legacy yOCTUnzipTiledScan
@@ -29,7 +29,7 @@ def main(argv=None):
     i = sub.add_parser("inspect", help="print scan summary and automatic parameters"); i.add_argument("volume")
     r = sub.add_parser("reconstruct", help="run a reconstruction")
     r.add_argument("volume"); r.add_argument("--output-root", default="outputs"); r.add_argument("--output-name")
-    r.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"]); r.add_argument("--config")
+    r.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu", "mps"]); r.add_argument("--config")
     r.add_argument("--rows", help="comma separated y-tile rows (0-based)")
     r.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="any ReconConfig field, JSON values allowed")
     d = sub.add_parser("estimate-dispersion"); d.add_argument("volume"); d.add_argument("--device", default="auto")

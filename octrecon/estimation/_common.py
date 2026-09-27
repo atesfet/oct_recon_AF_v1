@@ -41,7 +41,8 @@ class VolumeContext:
     def __init__(self, volume_folder, device: str = "cpu", dtype=np.float32):
         self.volume = resolve_volume(volume_folder)
         self.si = ScanInfo(self.volume)
-        self.xp, self.device = get_xp(device)
+        # estimators are short: on Apple silicon (MPS / torch) they run on the CPU
+        self.xp, self.device = get_xp("cpu" if device in ("mps", "torch-cpu") else device)
         self.dtype = np.dtype(dtype)
         self._readers: dict[str, TileReader] = {}
         first = self.reader(self.si.tiles[0].folder)
