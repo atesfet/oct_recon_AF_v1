@@ -1,0 +1,8 @@
+# NVIDIA GPU support via pip (Linux/Windows, driver supporting CUDA 12.x).
+# tools/setup_gpu.py installs these automatically when an NVIDIA driver is found.
+cupy-cuda12x
+nvidia-cuda-runtime-cu12
+nvidia-cuda-nvrtc-cu12
+nvidia-cufft-cu12
+nvidia-cublas-cu12
+nvidia-curand-cu12

@@ -1,0 +1,11 @@
+# pip fallback (when conda is not available). CPU packages; GPU: requirements-gpu.txt
+numpy>=1.26
+scipy
+numba
+tifffile
+imagecodecs
+pyyaml
+matplotlib
+psutil
+h5py
+pytest

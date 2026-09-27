@@ -1,0 +1,23 @@
+# Example reconstruction config (CLI: python -m octrecon reconstruct <volume> --config this.yaml)
+# "auto" values are resolved from ScanInfo.json / probe presets; see README section 4.
+volume_folder: /path/to/10um_FOV_1/OCTVolume
+output_root: /path/to/reconstructions
+output_name: 10um_FOV_1_recon
+dispersion_quadratic_term: auto   # -> 8.949e7 (probe preset GAN632 + Olympus20xOCTGWinter)
+focus_positions: auto             # -> zChosenFocusPositions.mat (433 px)
+focus_sigma: auto                 # -> 10
+crop_z_range_mm: auto             # -> [-0.03, 0.04]
+output_pixel_size_um: auto        # -> 2
+n_medium: auto                    # -> 1.33
+interp_method: sinc5
+apply_path_length_correction: true
+raw_input: auto
+device: auto
+precision: float32
+gpu_fused_kernel: true
+batch_frames: 50
+io_threads: 8
+prefetch_batches: 16
+write_tiff: true
+keep_float_volume: false
+legacy_double_quantization: false

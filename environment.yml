@@ -1,0 +1,16 @@
+# Base (CPU) environment, all platforms. GPU support (CuPy) is added by
+# tools/setup_gpu.py on Linux/Windows machines with an NVIDIA driver.
+name: oct_reconstruction
+channels: [conda-forge]
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - scipy
+  - numba
+  - tifffile
+  - imagecodecs
+  - pyyaml
+  - matplotlib
+  - psutil
+  - h5py
+  - pytest

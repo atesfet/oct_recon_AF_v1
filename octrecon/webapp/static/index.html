@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCT Reconstruction</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232563eb'/><path d='M5 20c4-8 7-8 11 0s7 8 11 0' stroke='white' stroke-width='3' fill='none'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◉</span>
+    <div>
+      <h1>OCT Reconstruction</h1>
+      <p class="sub">Tiled Thorlabs OCT volumes · GPU/CPU port of myOCT <code>yOCTProcessTiledScan</code> · <span id="version">oct_recon_AF_v1</span></p>
+    </div>
+  </div>
+  <div id="sysbadges" class="badges"></div>
+</header>
+
+<main>
+  <!-- 1. INPUT ------------------------------------------------------------ -->
+  <section class="card" id="card-input">
+    <h2><span class="step">1</span> Raw OCT volume</h2>
+    <p class="hint">Select the <code>OCTVolume</code> folder (it contains <code>ScanInfo.json</code> and the <code>Data01…DataNN</code> tile folders). Tiles may be unzipped or compressed <code>.oct</code> archives.</p>
+    <div class="row">
+      <input id="volume" type="text" placeholder="/path/to/sample/OCTVolume" spellcheck="false">
+      <button class="secondary" data-browse="volume" data-mode="dir">Browse…</button>
+      <button id="btn-inspect">Inspect</button>
+    </div>
+    <div id="inspect-out" class="hidden">
+      <div class="grid4" id="scan-summary"></div>
+      <div id="storage-note" class="note"></div>
+    </div>
+  </section>
+
+  <!-- 2. OUTPUT ----------------------------------------------------------- -->
+  <section class="card" id="card-output">
+    <h2><span class="step">2</span> Output</h2>
+    <div class="form2">
+      <label>Output folder
+        <div class="row"><input id="output_root" type="text" spellcheck="false"><button class="secondary" data-browse="output_root" data-mode="dir">Browse…</button></div>
+      </label>
+      <label>Reconstruction name
+        <input id="output_name" type="text" spellcheck="false" placeholder="sample_recon">
+      </label>
+    </div>
+    <p class="hint">Results are written to <code id="final-path">…</code></p>
+  </section>
+
+  <!-- 3. RECONSTRUCTION INPUTS ------------------------------------------- -->
+  <section class="card" id="card-params">
+    <h2><span class="step">3</span> Reconstruction inputs</h2>
+    <p class="hint">Values are filled in automatically from the scan. The <em>source</em> of every value is shown; override any of them.</p>
+    <div class="form2">
+      <label>Focus position (pixel per depth)
+        <div class="row">
+          <select id="focus_mode">
+            <option value="auto">Automatic (focus file if present, else detect)</option>
+            <option value="file">From .mat file</option>
+            <option value="value">Manual value(s)</option>
+            <option value="estimate">Detect automatically now</option>
+            <option value="none">No focus gating</option>
+          </select>
+        </div>
+        <div class="row hidden" id="focus-file-row"><input id="focus_file" type="text" placeholder="zChosenFocusPositions.mat"><button class="secondary" data-browse="focus_file" data-mode="file">Browse…</button></div>
+        <div class="row hidden" id="focus-value-row"><input id="focus_value" type="text" placeholder="e.g. 433  or  433,433,440,…"></div>
+        <span class="src" id="src-focus"></span>
+      </label>
+      <div class="tools">
+        <button class="secondary" id="btn-detect-focus">Detect focus</button>
+        <button class="secondary" id="btn-preview">Preview B-scan…</button>
+        <span id="focus-status" class="muted"></span>
+      </div>
+    </div>
+    <div id="focus-fig" class="fig hidden"></div>
+
+    <details id="advanced">
+      <summary>Advanced options — constants of the OCT system / probe (auto-filled)</summary>
+      <div class="form3">
+        <label>Dispersion quadratic term β [nm²/rad]
+          <div class="row"><input id="dispersion" type="text"><button class="secondary" id="btn-est-disp">Estimate</button></div>
+          <span class="src" id="src-dispersion"></span>
+        </label>
+        <label>Focus σ (z-stitching width) [px]
+          <input id="focus_sigma" type="text"><span class="src" id="src-focus_sigma"></span>
+        </label>
+        <label>Tissue refractive index n
+          <input id="n_medium" type="text"><span class="src" id="src-n_medium"></span>
+        </label>
+        <label>Crop z range [mm] (min, max) — empty = none
+          <input id="crop" type="text"><span class="src" id="src-crop_z_range_mm"></span>
+        </label>
+        <label>Output pixel size [µm]
+          <input id="pixel" type="text"><span class="src" id="src-output_pixel_size_um"></span>
+        </label>
+        <label>k-linearisation (interpMethod)
+          <select id="interp_method"><option>sinc5</option></select>
+          <span class="src">legacy demo default</span>
+        </label>
+        <label class="check"><input type="checkbox" id="opc" checked> Optical-path (field-curvature) correction</label>
+        <label>Compressed (.oct) tiles
+          <select id="raw_input">
+            <option value="auto">Read in place (no extraction)</option>
+            <option value="extract">Extract like legacy (yOCTUnzipTiledScan)</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="delete_archives"> Delete .oct after extraction (legacy default)</label>
+      </div>
+      <div id="disp-fig" class="fig hidden"></div>
+    </details>
+  </section>
+
+  <!-- 4. COMPUTE ---------------------------------------------------------- -->
+  <section class="card" id="card-compute">
+    <h2><span class="step">4</span> Compute</h2>
+    <div class="devices">
+      <label class="devcard" id="dev-gpu"><input type="radio" name="device" value="gpu"><div><b>GPU</b><span id="gpu-desc">checking…</span></div></label>
+      <label class="devcard" id="dev-cpu"><input type="radio" name="device" value="cpu"><div><b>CPU</b><span id="cpu-desc">…</span></div></label>
+    </div>
+    <details>
+      <summary>Compute parameters (defaults are tuned; change only if needed)</summary>
+      <div class="form3">
+        <label>Precision<select id="precision"><option value="float32">float32 (default)</option><option value="float64">float64</option></select></label>
+        <label>B-scans per batch<input id="batch_frames" type="number" min="1"></label>
+        <label>I/O reader threads<input id="io_threads" type="number" min="1"></label>
+        <label>Prefetched batches<input id="prefetch_batches" type="number" min="1"></label>
+        <label>Y-tile rows to process (empty = all)<input id="rows" type="text" placeholder="e.g. 4  or  0-2,5"></label>
+        <label class="check"><input type="checkbox" id="gpu_fused_kernel" checked> Fused CUDA kernel (GPU)</label>
+        <label class="check"><input type="checkbox" id="write_tiff" checked> Write uint16 BigTIFF</label>
+        <label class="check"><input type="checkbox" id="keep_float_volume"> Keep float32 dB volume (.npy)</label>
+        <label class="check"><input type="checkbox" id="legacy_double_quantization"> Legacy double quantisation (bit-exact legacy TIFF)</label>
+      </div>
+    </details>
+  </section>
+
+  <!-- 5. RUN -------------------------------------------------------------- -->
+  <section class="card" id="card-run">
+    <h2><span class="step">5</span> Run</h2>
+    <div class="row">
+      <button id="btn-run" class="primary">Start reconstruction</button>
+      <button id="btn-cancel" class="danger hidden">Cancel</button>
+      <button id="btn-save-cfg" class="secondary">Save config…</button>
+      <label class="secondary filebtn">Load config…<input type="file" id="load-cfg" accept=".json"></label>
+    </div>
+    <div id="progress-wrap" class="hidden">
+      <div class="progress"><div id="progress-bar"></div></div>
+      <div id="progress-text" class="muted"></div>
+    </div>
+    <div id="result" class="hidden"></div>
+    <pre id="log" class="log hidden"></pre>
+  </section>
+</main>
+
+<!-- folder browser modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <b id="modal-title">Select folder</b>
+      <button class="icon" id="modal-close">✕</button>
+    </div>
+    <div class="row">
+      <button class="secondary" id="modal-up">↑ Up</button>
+      <button class="secondary" id="modal-home">Home</button>
+      <select id="modal-roots"></select>
+      <input id="modal-path" type="text" spellcheck="false">
+    </div>
+    <ul id="modal-list"></ul>
+    <div class="modal-foot">
+      <span class="muted" id="modal-note"></span>
+      <button class="primary" id="modal-select">Select this folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- B-scan preview modal -->
+<div id="pmodal" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <b>B-scan preview — click on the focus band to set the focus pixel</b>
+      <button class="icon" id="pmodal-close">✕</button>
+    </div>
+    <div class="row">
+      <label>Depth tile <select id="p-zi"></select></label>
+      <button class="secondary" id="p-refresh">Refresh</button>
+      <span id="p-info" class="muted"></span>
+    </div>
+    <div class="pimg-wrap"><img id="p-img" alt=""><div id="p-line" class="hidden"></div></div>
+    <div class="modal-foot">
+      <span class="muted" id="p-click"></span>
+      <button class="primary" id="p-use">Use this focus for all depths</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
