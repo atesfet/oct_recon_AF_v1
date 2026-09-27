@@ -9,3 +9,4 @@ outputs/
 !tests/data/**
 .DS_Store
 Thumbs.db
+.claude/
